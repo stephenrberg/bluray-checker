@@ -102,6 +102,30 @@ function renderBanner(match, daysOld) {
   document.getElementById("bluray-own-close").onclick = () => banner.remove();
 }
 
+function extractJbhifiProduct() {
+  const h1 = document.querySelector("h1");
+  const rawTitle = h1?.textContent?.trim() || document.title.replace(/\s*\|\s*JB Hi-Fi.*$/i, "").trim();
+  const title = rawTitle || "";
+
+  const barcodes = [];
+  try {
+    const rawText = typeof document.body?.innerText === "string"
+      ? document.body.innerText.replace(/[\u200e\u200f\u202a-\u202e]/g, "")
+      : "";
+    if (rawText) {
+      const regex = /\b(?:EAN|UPC|GTIN|Barcode)\b[^\S\r\n]*[:;\-]?[\s\r\n]*([0-9][0-9\s\-]{10,15}[0-9])/gi;
+      for (const m of rawText.matchAll(regex)) {
+        const clean = m[1].replace(/[^0-9]/g, "");
+        if ((clean.length === 12 || clean.length === 13) && !barcodes.includes(clean)) {
+          barcodes.push(clean);
+        }
+      }
+    }
+  } catch (_) {}
+
+  return { barcodes, title };
+}
+
 function extractAmazonProduct() {
   const urlMatch = window.location.pathname.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i);
   const inputAsin = document.querySelector("#ASIN")?.value;
@@ -119,18 +143,23 @@ function extractAmazonProduct() {
     "#productOverview_feature_div"
   ];
 
-  const rawText = detailContainers
-    .map(sel => document.querySelector(sel)?.innerText || "")
-    .join("\n")
-    .replace(/[\u200e\u200f\u202a-\u202e]/g, "");
-
   const barcodes = [];
-  const regex = /\b(?:EAN|UPC|GTIN|Barcode)\b[\s:;\-\r\n]*([0-9][0-9\s\-]{10,15}[0-9])/gi;
-  let m;
-  while ((m = regex.exec(rawText)) !== null) {
-    const clean = m[1].replace(/[^0-9]/g, "");
-    if (clean.length === 12 || clean.length === 13) barcodes.push(clean);
-  }
+  try {
+    const rawText = detailContainers
+      .map(sel => document.querySelector(sel)?.innerText || "")
+      .join("\n")
+      .replace(/[\u200e\u200f\u202a-\u202e]/g, "");
+
+    if (rawText) {
+      const regex = /\b(?:EAN|UPC|GTIN|Barcode)\b[^\S\r\n]*[:;\-]?[\s\r\n]*([0-9][0-9\s\-]{10,15}[0-9])/gi;
+      for (const m of rawText.matchAll(regex)) {
+        const clean = m[1].replace(/[^0-9]/g, "");
+        if ((clean.length === 12 || clean.length === 13) && !barcodes.includes(clean)) {
+          barcodes.push(clean);
+        }
+      }
+    }
+  } catch (_) {}
 
   return { asin, barcodes, title };
 }
@@ -194,12 +223,19 @@ function extractEbayProduct() {
     }
 
     // 4. Fallback regex across visible body text
-    const bodyText = (doc.body?.innerText || "").replace(/[\u200e\u200f\u202a-\u202e]/g, "");
-    const regex = /\b(?:EAN|UPC|GTIN)\b[\s:;\-\r\n]*([0-9][0-9\s\-]{10,15}[0-9])/gi;
-    let m;
-    while ((m = regex.exec(bodyText)) !== null) {
-      addCode(m[1]);
-    }
+    try {
+      const rawBody = doc.body?.innerText;
+      if (typeof rawBody === "string" && rawBody.length > 0 && rawBody.length < 250000) {
+        const bodyText = rawBody.replace(/[\u200e\u200f\u202a-\u202e]/g, "");
+        const regex = /\b(?:EAN|UPC|GTIN)\b[^\S\r\n]*[:;\-]?[\s\r\n]*([0-9][0-9\s\-]{10,15}[0-9])/gi;
+        let match;
+        let count = 0;
+        while ((match = regex.exec(bodyText)) !== null && count < 20) {
+          addCode(match[1]);
+          count++;
+        }
+      }
+    } catch (_) {}
   }
 
   console.log("[Blu-ray Checker] eBay extracted:", { title, barcodes: Array.from(barcodes) });
@@ -229,20 +265,30 @@ async function checkCurrentPage() {
       renderBanner(null, 0);
       return;
     }
+
+    const domProduct = extractJbhifiProduct();
+    let apiBarcode = "";
+    let apiTitle = "";
+
     try {
       const res = await fetch(`${path}.js`);
-      if (!res.ok) return;
-      const product = await res.json();
-      const match = evaluateOwnership(
-        { barcode: product?.variants?.[0]?.barcode, title: product?.title },
-        barcodeSet,
-        asinSet,
-        titlesMap
-      );
-      renderBanner(match, daysOld);
-    } catch (err) {
-      console.warn("Blu-ray.com JB checker error:", err);
-    }
+      if (res.ok) {
+        const product = await res.json();
+        apiBarcode = product?.variants?.[0]?.barcode || "";
+        apiTitle = product?.title || "";
+      }
+    } catch (_) {}
+
+    const combined = {
+      barcode: apiBarcode,
+      barcodes: domProduct.barcodes,
+      title: apiTitle || domProduct.title
+    };
+
+    if (!combined.title && !combined.barcode && combined.barcodes.length === 0) return;
+
+    const match = evaluateOwnership(combined, barcodeSet, asinSet, titlesMap);
+    renderBanner(match, daysOld);
     return;
   }
 
