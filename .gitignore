@@ -1,0 +1,22 @@
+# OS & editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Blu-ray.com CSV exports & local collection cache
+*.csv
+collectionData*.json
+
+# Packaged extension artifacts & build outputs (if ever added)
+*.crx
+*.pem
+*.zip
+dist/
+build/
+
+# Logs & temporary files
+*.log
+npm-debug.log*

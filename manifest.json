@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "JB, Amazon & eBay AU Blu-ray.com Collection Checker",
+  "version": "1.2.0",
+  "description": "Flags JB Hi-Fi, Amazon AU, and eBay AU movies you already own using your Blu-ray.com CSV export.",
+  "permissions": ["storage"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Blu-ray.com Collection Checker"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.jbhifi.com.au/*",
+        "https://www.amazon.com.au/*",
+        "https://www.ebay.com.au/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

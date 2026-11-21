@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font-family: system-ui, sans-serif; width: 290px; padding: 14px; margin: 0; color: #1a1a1a; }
+    h3 { margin: 0 0 10px; font-size: 15px; }
+    .card { background: #f4f5f7; border-radius: 6px; padding: 10px; margin-bottom: 12px; font-size: 13px; }
+    .age { font-weight: 600; margin-top: 4px; }
+    .fresh { color: #34cd67; }
+    .stale { color: #c9510c; }
+    input[type="file"] { width: 100%; font-size: 12px; margin-top: 6px; }
+    .status { font-size: 12px; margin-top: 8px; color: #444; }
+  </style>
+</head>
+<body>
+  <h3>Blu-ray.com Collection Sync</h3>
+  <div class="card" id="stats">No CSV uploaded yet.</div>
+  <label style="font-size: 12px; font-weight: 600;">Upload Blu-ray.com CSV Export:</label>
+  <input type="file" id="csvFile" accept=".csv,.txt" />
+  <div class="status" id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
