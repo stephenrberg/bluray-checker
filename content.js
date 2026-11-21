@@ -251,12 +251,23 @@ async function checkCurrentPage() {
   if (currentKey === lastCheckedKey) return;
 
   const { collectionData } = await chrome.storage.local.get("collectionData");
-  if (!collectionData) return;
+  if (!collectionData || typeof collectionData !== "object") {
+    renderBanner(null, 0);
+    return;
+  }
+
+  const hasBarcodes = Array.isArray(collectionData.barcodes) && collectionData.barcodes.length > 0;
+  const hasAsins = Array.isArray(collectionData.asins) && collectionData.asins.length > 0;
+  const hasTitles = collectionData.titles && typeof collectionData.titles === "object" && Object.keys(collectionData.titles).length > 0;
+  if (!hasBarcodes && !hasAsins && !hasTitles) {
+    renderBanner(null, 0);
+    return;
+  }
 
   const barcodeSet = new Set(collectionData.barcodes || []);
   const asinSet = new Set(collectionData.asins || []);
   const titlesMap = collectionData.titles || {};
-  const daysOld = Math.floor((Date.now() - collectionData.updatedAt) / 86400000);
+  const daysOld = typeof collectionData.updatedAt === 'number' ? Math.max(0, Math.floor((Date.now() - collectionData.updatedAt) / 86400000)) : 0;
 
   // 1. JB Hi-Fi
   if (host.includes("jbhifi.com.au")) {
