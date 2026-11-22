@@ -168,12 +168,34 @@ function extractAmazonProduct() {
   return { asin, barcodes, title };
 }
 
-function collectRoots(root, out = []) {
-  out.push(root);
+function collectShadowRoots(root, out = []) {
   root.querySelectorAll("*").forEach(el => {
-    if (el.shadowRoot) collectRoots(el.shadowRoot, out);
+    if (el.shadowRoot) {
+      out.push(el.shadowRoot);
+      collectShadowRoots(el.shadowRoot, out);
+    }
   });
   return out;
+}
+
+function scanLabelValuesInRoot(root, barcodes, altTitles, addCode) {
+  root.querySelectorAll(".ux-labels-values__labels, dt").forEach(labelEl => {
+    const label = (labelEl.textContent || "").trim().toUpperCase();
+    if (!label) return;
+
+    if (/\b(UPC|EAN|GTIN)\b/.test(label)) {
+      const container = labelEl.closest(".ux-layout-section-evo__col, .ux-labels-values, dl");
+      const valueEl = container?.querySelector(".ux-labels-values__values, dd") || labelEl.nextElementSibling;
+      addCode(valueEl?.textContent);
+    }
+
+    if (/\b(MOVIE\/TV TITLE|MOVIE TITLE|TV TITLE|TITLE)\b/.test(label)) {
+      const container = labelEl.closest(".ux-layout-section-evo__col, .ux-labels-values, dl");
+      const valueEl = container?.querySelector(".ux-labels-values__values, dd") || labelEl.nextElementSibling;
+      const val = (valueEl?.textContent || "").trim();
+      if (val && val.toLowerCase() !== "does not apply") altTitles.add(val);
+    }
+  });
 }
 
 function extractEbayProduct() {
@@ -184,6 +206,7 @@ function extractEbayProduct() {
   if (!title) return null;
 
   const barcodes = new Set();
+  const altTitles = new Set();
   const addCode = (raw) => {
     const clean = String(raw || "").replace(/[^0-9]/g, "");
     if (clean.length === 12 || clean.length === 13) barcodes.add(clean);
@@ -214,46 +237,29 @@ function extractEbayProduct() {
       } catch (_) {}
     });
 
-    // 3. Walk DOM + Shadow DOMs for Item Specifics (<dt>/<dd>) & Product Identifiers (.ux-labels-values)
-    for (const root of collectRoots(doc)) {
-      root.querySelectorAll(".ux-labels-values__labels, dt").forEach(labelEl => {
-        const label = (labelEl.textContent || "").trim().toUpperCase();
-        if (/\b(UPC|EAN|GTIN)\b/.test(label)) {
-          const container = labelEl.closest(".ux-layout-section-evo__col, .ux-labels-values, dl");
-          const valueEl = container?.querySelector(".ux-labels-values__values, dd") || labelEl.nextElementSibling;
-          addCode(valueEl?.textContent);
-        }
-      });
+    // 3. Direct DOM scan first, then Shadow DOMs only if needed
+    scanLabelValuesInRoot(doc, barcodes, altTitles, addCode);
+    if (barcodes.size === 0 || altTitles.size === 0) {
+      for (const shadowRoot of collectShadowRoots(doc)) {
+        scanLabelValuesInRoot(shadowRoot, barcodes, altTitles, addCode);
+      }
     }
 
-    // 4. Fallback regex across visible body text
-    try {
-      const rawBody = doc.body?.innerText;
-      if (typeof rawBody === "string" && rawBody.length > 0 && rawBody.length < 250000) {
-        const bodyText = rawBody.replace(/[\u200e\u200f\u202a-\u202e]/g, "");
-        const regex = /\b(?:EAN|UPC|GTIN)\b[^\S\r\n]*[:;\-]?[\s\r\n]*([0-9][0-9\s\-]{10,15}[0-9])/gi;
-        let match;
-        let count = 0;
-        while ((match = regex.exec(bodyText)) !== null && count < 20) {
-          addCode(match[1]);
-          count++;
+    // 4. Fallback regex across visible body text only if no barcode found yet
+    if (barcodes.size === 0) {
+      try {
+        const rawBody = doc.body?.innerText;
+        if (typeof rawBody === "string" && rawBody.length > 0 && rawBody.length < 250000) {
+          const bodyText = rawBody.replace(/[\u200e\u200f\u202a-\u202e]/g, "");
+          const regex = /\b(?:EAN|UPC|GTIN)\b[^\S\r\n]*[:;\-]?[\s\r\n]*([0-9][0-9\s\-]{10,15}[0-9])/gi;
+          let match;
+          let count = 0;
+          while ((match = regex.exec(bodyText)) !== null && count < 20) {
+            addCode(match[1]);
+            count++;
+          }
         }
-      }
-    } catch (_) {}
-  }
-
-  const altTitles = new Set();
-  for (const doc of docs) {
-    for (const root of collectRoots(doc)) {
-      root.querySelectorAll(".ux-labels-values__labels, dt").forEach(labelEl => {
-        const label = (labelEl.textContent || "").trim().toUpperCase();
-        if (/\b(MOVIE\/TV TITLE|MOVIE TITLE|TV TITLE|TITLE)\b/.test(label)) {
-          const container = labelEl.closest(".ux-layout-section-evo__col, .ux-labels-values, dl");
-          const valueEl = container?.querySelector(".ux-labels-values__values, dd") || labelEl.nextElementSibling;
-          const val = (valueEl?.textContent || "").trim();
-          if (val && val.toLowerCase() !== "does not apply") altTitles.add(val);
-        }
-      });
+      } catch (_) {}
     }
   }
 
@@ -262,8 +268,11 @@ function extractEbayProduct() {
 }
 
 let lastCheckedKey = "";
+let ebayPollTicks = 0;
+const MAX_EBAY_POLL_TICKS = 6; // ~9s at 1500ms interval
 
 async function checkCurrentPage() {
+  if (document.hidden) return;
   const host = window.location.hostname;
   const path = window.location.pathname;
   const currentKey = `${host}${path}${window.location.search}`;
@@ -344,22 +353,38 @@ async function checkCurrentPage() {
   if (host.includes("ebay.com.au")) {
     if (!path.startsWith("/itm/")) {
       lastCheckedKey = currentKey;
+      ebayPollTicks = 0;
       renderBanner(null, 0);
       return;
     }
 
+    ebayPollTicks++;
     const ebayProduct = extractEbayProduct();
-    if (!ebayProduct || !ebayProduct.title) return;
+    if (!ebayProduct || !ebayProduct.title) {
+      if (ebayPollTicks >= MAX_EBAY_POLL_TICKS) {
+        lastCheckedKey = currentKey;
+        ebayPollTicks = 0;
+      }
+      return;
+    }
 
     const match = evaluateOwnership(ebayProduct, barcodeSet, asinSet, titlesMap);
     renderBanner(match, daysOld);
 
-    // Lock once a barcode is found, or once Item Specifics section has finished rendering
-    if (ebayProduct.barcodes.length > 0 || document.querySelector(".ux-layout-section-evo__item--table-view")) {
+    // Lock once a barcode is found, Item Specifics table renders, or max poll budget is reached
+    if (
+      ebayProduct.barcodes.length > 0 ||
+      document.querySelector(".ux-layout-section-evo__item--table-view") ||
+      ebayPollTicks >= MAX_EBAY_POLL_TICKS
+    ) {
       lastCheckedKey = currentKey;
+      ebayPollTicks = 0;
     }
   }
 }
 
 checkCurrentPage();
-setInterval(checkCurrentPage, 800);
+setInterval(checkCurrentPage, 1500);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) checkCurrentPage();
+});
