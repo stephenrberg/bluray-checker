@@ -20,12 +20,14 @@ function expandBarcodeForms(code) {
   return forms;
 }
 
-function evaluateOwnership({ barcode, barcodes = [], asin, title }, barcodeSet, asinSet, titlesMap) {
+function evaluateOwnership({ barcode, barcodes = [], asin, title, altTitles = [] }, barcodeSet, asinSet, titlesMap) {
   const allBarcodes = [...(barcode ? [barcode] : []), ...barcodes]
     .flatMap(expandBarcodeForms);
 
   const cleanAsin = (asin || "").trim().toUpperCase();
-  const normTitle = normalizeTitle(title || "");
+  const candidateTitles = [title, ...altTitles]
+    .map(t => normalizeTitle(t || ""))
+    .filter(Boolean);
 
   // 1. Exact ASIN Match -> RED
   if (cleanAsin && asinSet.has(cleanAsin)) {
@@ -47,16 +49,18 @@ function evaluateOwnership({ barcode, barcodes = [], asin, title }, barcodeSet, 
     }
   }
 
-  // 3. Normalized Title Match -> ORANGE
-  if (normTitle && titlesMap[normTitle]) {
-    const matches = titlesMap[normTitle]
-      .map(m => (m.studio ? `${m.title} — ${m.studio}` : m.title))
-      .join(" | ");
-    return {
-      status: "YOU MIGHT OWN THIS",
-      bg: "#e99323",
-      detail: `In library: ${matches}`
-    };
+  // 3. Normalized Title Match (primary title or fallback fields like Movie/TV Title) -> ORANGE
+  for (const normTitle of candidateTitles) {
+    if (titlesMap[normTitle]) {
+      const matches = titlesMap[normTitle]
+        .map(m => (m.studio ? `${m.title} — ${m.studio}` : m.title))
+        .join(" | ");
+      return {
+        status: "YOU MIGHT OWN THIS",
+        bg: "#e99323",
+        detail: `In library: ${matches}`
+      };
+    }
   }
 
   return null;
@@ -238,8 +242,23 @@ function extractEbayProduct() {
     } catch (_) {}
   }
 
-  console.log("[Blu-ray Checker] eBay extracted:", { title, barcodes: Array.from(barcodes) });
-  return { barcodes: Array.from(barcodes), title };
+  const altTitles = new Set();
+  for (const doc of docs) {
+    for (const root of collectRoots(doc)) {
+      root.querySelectorAll(".ux-labels-values__labels, dt").forEach(labelEl => {
+        const label = (labelEl.textContent || "").trim().toUpperCase();
+        if (/\b(MOVIE\/TV TITLE|MOVIE TITLE|TV TITLE|TITLE)\b/.test(label)) {
+          const container = labelEl.closest(".ux-layout-section-evo__col, .ux-labels-values, dl");
+          const valueEl = container?.querySelector(".ux-labels-values__values, dd") || labelEl.nextElementSibling;
+          const val = (valueEl?.textContent || "").trim();
+          if (val && val.toLowerCase() !== "does not apply") altTitles.add(val);
+        }
+      });
+    }
+  }
+
+  console.log("[Blu-ray Checker] eBay extracted:", { title, altTitles: Array.from(altTitles), barcodes: Array.from(barcodes) });
+  return { barcodes: Array.from(barcodes), title, altTitles: Array.from(altTitles) };
 }
 
 let lastCheckedKey = "";
