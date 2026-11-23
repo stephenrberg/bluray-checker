@@ -1,15 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "JB, Amazon & eBay AU Blu-ray.com Collection Checker",
-  "version": "1.2.0",
+  "name": "Blu-ray.com Collection Checker",
+  "version": "1.3.0",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "description": "Flags JB Hi-Fi, Amazon AU, and eBay AU movies you already own using your Blu-ray.com CSV export.",
-  "permissions": ["storage"],
+  "description": "Flags movies & TV discs you already own across JB Hi-Fi, Sanity, EzyDVD, Amazon, and eBay using your Blu-ray.com CSV export.",
+  "permissions": [
+    "storage"
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_title": "Blu-ray.com Collection Checker",
@@ -24,10 +26,29 @@
     {
       "matches": [
         "https://www.jbhifi.com.au/*",
+        "https://www.sanity.com.au/*",
+        "https://www.ezydvd.com.au/*",
         "https://www.amazon.com.au/*",
-        "https://www.ebay.com.au/*"
+        "https://www.amazon.com/*",
+        "https://www.amazon.co.uk/*",
+        "https://www.amazon.ca/*",
+        "https://www.amazon.de/*",
+        "https://www.amazon.fr/*",
+        "https://www.amazon.it/*",
+        "https://www.amazon.es/*",
+        "https://www.amazon.co.jp/*",
+        "https://www.ebay.com.au/*",
+        "https://www.ebay.com/*",
+        "https://www.ebay.co.uk/*",
+        "https://www.ebay.ca/*",
+        "https://www.ebay.de/*",
+        "https://www.ebay.fr/*",
+        "https://www.ebay.it/*",
+        "https://www.ebay.es/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]

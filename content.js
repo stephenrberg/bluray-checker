@@ -2,7 +2,7 @@ function normalizeTitle(raw) {
   return (raw || "")
     .toLowerCase()
     .replace(/\[.*?\]|\(.*?\)/g, " ")
-    .replace(/\b(4k ultra hd|ultra hd|uhd|4k|blu-ray|bluray|blu ray|dvd|3d|steelbook|slipcover|o-ring|collector'?s edition|limited edition|special edition|remastered|region [a-c0-9]|region free|australia|australian|aus stock|import|brand new|new|sealed|free post|free postage|complete series|season \d+)\b/g, " ")
+    .replace(/\b(4k ultra hd|ultra hd|uhd|4k|blu-ray|bluray|blu ray|dvd|3d|steelbook|mediabook|slipcover|o-ring|collector'?s edition|limited edition|special edition|remastered|region [a-c0-9]|region free|australia|australian|aus stock|import|uk import|us import|fsk|bbfc|brand new|new|sealed|free post|free postage|complete series|season \d+)\b/g, " ")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -106,28 +106,71 @@ function renderBanner(match, daysOld) {
   document.getElementById("bluray-own-close").onclick = () => banner.remove();
 }
 
-function extractJbhifiProduct() {
-  const h1 = document.querySelector("h1");
-  const rawTitle = h1?.textContent?.trim() || document.title.replace(/\s*\|\s*JB Hi-Fi.*$/i, "").trim();
-  const title = rawTitle || "";
+function extractBarcodesFromText(rawText, maxMatches = 20) {
+  const found = [];
+  if (!rawText || typeof rawText !== "string") return found;
+  const cleanedText = rawText.replace(/[\u200e\u200f\u202a-\u202e]/g, "");
+  if (!cleanedText || cleanedText.length > 250000) return found;
 
-  const barcodes = [];
-  try {
-    const rawText = typeof document.body?.innerText === "string"
-      ? document.body.innerText.replace(/[\u200e\u200f\u202a-\u202e]/g, "")
-      : "";
-    if (rawText) {
-      const regex = /\b(?:EAN|UPC|GTIN|Barcode)\b[^\S\r\n]*[:;\-]?[\s\r\n]*([0-9][0-9\s\-]{10,15}[0-9])/gi;
-      for (const m of rawText.matchAll(regex)) {
-        const clean = m[1].replace(/[^0-9]/g, "");
-        if ((clean.length === 12 || clean.length === 13) && !barcodes.includes(clean)) {
-          barcodes.push(clean);
+  const regex = /\b(?:EAN|UPC|GTIN|Barcode|JAN|Strichcode|Code-barres|Codice a barre|C[oó]digo de barras)\b[^\S\r\n]*[:;\-]?[\s\r\n]*([0-9][0-9\s\-]{10,15}[0-9])/gi;
+  let match;
+  let count = 0;
+  while ((match = regex.exec(cleanedText)) !== null && count < maxMatches) {
+    const clean = match[1].replace(/[^0-9]/g, "");
+    if ((clean.length === 12 || clean.length === 13) && !found.includes(clean)) {
+      found.push(clean);
+      count++;
+    }
+  }
+  return found;
+}
+
+function extractJsonLdBarcodes(doc = document) {
+  const found = [];
+  doc.querySelectorAll('script[type="application/ld+json"]').forEach(script => {
+    try {
+      const json = JSON.parse(script.textContent);
+      const items = Array.isArray(json) ? json : [json];
+      for (const item of items) {
+        if (!item || typeof item !== "object") continue;
+        for (const key of ["gtin13", "gtin12", "gtin", "gtin14", "productID", "isbn"]) {
+          const clean = String(item[key] || "").replace(/[^0-9]/g, "");
+          if ((clean.length === 12 || clean.length === 13) && !found.includes(clean)) {
+            found.push(clean);
+          }
         }
       }
+    } catch (_) {}
+  });
+  return found;
+}
+
+function extractRetailStoreProduct(siteSuffixRegex) {
+  const h1 = document.querySelector("h1");
+  const rawTitle = h1?.textContent?.trim() || document.title.replace(siteSuffixRegex, "").trim();
+  const title = rawTitle || "";
+
+  const barcodes = new Set(extractJsonLdBarcodes(document));
+  try {
+    const rawBody = document.body?.innerText;
+    for (const code of extractBarcodesFromText(rawBody)) {
+      barcodes.add(code);
     }
   } catch (_) {}
 
-  return { barcodes, title };
+  return { barcodes: Array.from(barcodes), title };
+}
+
+function extractJbhifiProduct() {
+  return extractRetailStoreProduct(/\s*\|\s*JB Hi-Fi.*$/i);
+}
+
+function extractSanityProduct() {
+  return extractRetailStoreProduct(/\s*[\|\-]\s*Sanity.*$/i);
+}
+
+function extractEzydvdProduct() {
+  return extractRetailStoreProduct(/\s*[\|\-]\s*EzyDVD.*$/i);
 }
 
 function extractAmazonProduct() {
@@ -147,25 +190,17 @@ function extractAmazonProduct() {
     "#productOverview_feature_div"
   ];
 
-  const barcodes = [];
+  const barcodes = new Set(extractJsonLdBarcodes(document));
   try {
     const rawText = detailContainers
       .map(sel => document.querySelector(sel)?.innerText || "")
-      .join("\n")
-      .replace(/[\u200e\u200f\u202a-\u202e]/g, "");
-
-    if (rawText) {
-      const regex = /\b(?:EAN|UPC|GTIN|Barcode)\b[^\S\r\n]*[:;\-]?[\s\r\n]*([0-9][0-9\s\-]{10,15}[0-9])/gi;
-      for (const m of rawText.matchAll(regex)) {
-        const clean = m[1].replace(/[^0-9]/g, "");
-        if ((clean.length === 12 || clean.length === 13) && !barcodes.includes(clean)) {
-          barcodes.push(clean);
-        }
-      }
+      .join("\n");
+    for (const code of extractBarcodesFromText(rawText)) {
+      barcodes.add(code);
     }
   } catch (_) {}
 
-  return { asin, barcodes, title };
+  return { asin, barcodes: Array.from(barcodes), title };
 }
 
 function collectShadowRoots(root, out = []) {
@@ -183,13 +218,13 @@ function scanLabelValuesInRoot(root, barcodes, altTitles, addCode) {
     const label = (labelEl.textContent || "").trim().toUpperCase();
     if (!label) return;
 
-    if (/\b(UPC|EAN|GTIN)\b/.test(label)) {
+    if (/\b(UPC|EAN|GTIN|JAN|STRICHCODE|CODE-BARRES)\b/.test(label)) {
       const container = labelEl.closest(".ux-layout-section-evo__col, .ux-labels-values, dl");
       const valueEl = container?.querySelector(".ux-labels-values__values, dd") || labelEl.nextElementSibling;
       addCode(valueEl?.textContent);
     }
 
-    if (/\b(MOVIE\/TV TITLE|MOVIE TITLE|TV TITLE|TITLE)\b/.test(label)) {
+    if (/\b(MOVIE\/TV TITLE|MOVIE TITLE|TV TITLE|FILM-\/FERNSEHTITEL|TITRE DU FILM|TITOLO DEL FILM|T[IÍ]TULO DE LA PEL[IÍ]CULA|TITLE)\b/.test(label)) {
       const container = labelEl.closest(".ux-layout-section-evo__col, .ux-labels-values, dl");
       const valueEl = container?.querySelector(".ux-labels-values__values, dd") || labelEl.nextElementSibling;
       const val = (valueEl?.textContent || "").trim();
@@ -212,7 +247,7 @@ function extractEbayProduct() {
     if (clean.length === 12 || clean.length === 13) barcodes.add(clean);
   };
 
-  // 1. Page <title> (eBay AU appends catalog UPC/EAN here, e.g. "... : NEW 9317731098314 | eBay Australia")
+  // 1. Page <title> (eBay appends catalog UPC/EAN here, e.g. "... : NEW 9317731098314 | eBay Australia")
   const titleBarcode = document.title.match(/\b(\d{12,13})\b/);
   if (titleBarcode) addCode(titleBarcode[1]);
 
@@ -225,17 +260,9 @@ function extractEbayProduct() {
 
   for (const doc of docs) {
     // 2. JSON-LD schema blocks
-    doc.querySelectorAll('script[type="application/ld+json"]').forEach(script => {
-      try {
-        const json = JSON.parse(script.textContent);
-        const items = Array.isArray(json) ? json : [json];
-        for (const item of items) {
-          for (const key of ["gtin13", "gtin12", "gtin", "gtin14", "productID"]) {
-            addCode(item?.[key]);
-          }
-        }
-      } catch (_) {}
-    });
+    for (const code of extractJsonLdBarcodes(doc)) {
+      barcodes.add(code);
+    }
 
     // 3. Direct DOM scan first, then Shadow DOMs only if needed
     scanLabelValuesInRoot(doc, barcodes, altTitles, addCode);
@@ -248,23 +275,64 @@ function extractEbayProduct() {
     // 4. Fallback regex across visible body text only if no barcode found yet
     if (barcodes.size === 0) {
       try {
-        const rawBody = doc.body?.innerText;
-        if (typeof rawBody === "string" && rawBody.length > 0 && rawBody.length < 250000) {
-          const bodyText = rawBody.replace(/[\u200e\u200f\u202a-\u202e]/g, "");
-          const regex = /\b(?:EAN|UPC|GTIN)\b[^\S\r\n]*[:;\-]?[\s\r\n]*([0-9][0-9\s\-]{10,15}[0-9])/gi;
-          let match;
-          let count = 0;
-          while ((match = regex.exec(bodyText)) !== null && count < 20) {
-            addCode(match[1]);
-            count++;
-          }
+        for (const code of extractBarcodesFromText(doc.body?.innerText)) {
+          barcodes.add(code);
         }
       } catch (_) {}
     }
   }
 
-  console.log("[Blu-ray Checker] eBay extracted:", { title, altTitles: Array.from(altTitles), barcodes: Array.from(barcodes) });
   return { barcodes: Array.from(barcodes), title, altTitles: Array.from(altTitles) };
+}
+
+function isAmazonHost(host) {
+  return (
+    host === "amazon.com" ||
+    host.endsWith(".amazon.com") ||
+    /\.amazon\.(com\.au|co\.uk|ca|de|fr|it|es|co\.jp)$/.test(host)
+  );
+}
+
+function isEbayHost(host) {
+  return (
+    host === "ebay.com" ||
+    host.endsWith(".ebay.com") ||
+    /\.ebay\.(com\.au|co\.uk|ca|de|fr|it|es)$/.test(host)
+  );
+}
+
+async function handleSimpleRetailPage({ host, path, currentKey, daysOld, barcodeSet, asinSet, titlesMap, isProductPath, extractor, supportsJsEndpoint }) {
+  lastCheckedKey = currentKey;
+  if (!isProductPath(path)) {
+    renderBanner(null, 0);
+    return;
+  }
+
+  const domProduct = extractor();
+  let apiBarcode = "";
+  let apiTitle = "";
+
+  if (supportsJsEndpoint && path.startsWith("/products/")) {
+    try {
+      const res = await fetch(`${path}.js`);
+      if (res.ok) {
+        const product = await res.json();
+        apiBarcode = product?.variants?.[0]?.barcode || "";
+        apiTitle = product?.title || "";
+      }
+    } catch (_) {}
+  }
+
+  const combined = {
+    barcode: apiBarcode,
+    barcodes: domProduct.barcodes,
+    title: apiTitle || domProduct.title
+  };
+
+  if (!combined.title && !combined.barcode && combined.barcodes.length === 0) return;
+
+  const match = evaluateOwnership(combined, barcodeSet, asinSet, titlesMap);
+  renderBanner(match, daysOld);
 }
 
 let lastCheckedKey = "";
@@ -295,44 +363,61 @@ async function checkCurrentPage() {
   const barcodeSet = new Set(collectionData.barcodes || []);
   const asinSet = new Set(collectionData.asins || []);
   const titlesMap = collectionData.titles || {};
-  const daysOld = typeof collectionData.updatedAt === 'number' ? Math.max(0, Math.floor((Date.now() - collectionData.updatedAt) / 86400000)) : 0;
+  const daysOld = typeof collectionData.updatedAt === "number" ? Math.max(0, Math.floor((Date.now() - collectionData.updatedAt) / 86400000)) : 0;
 
   // 1. JB Hi-Fi
   if (host.includes("jbhifi.com.au")) {
-    lastCheckedKey = currentKey;
-    if (!path.startsWith("/products/")) {
-      renderBanner(null, 0);
-      return;
-    }
-
-    const domProduct = extractJbhifiProduct();
-    let apiBarcode = "";
-    let apiTitle = "";
-
-    try {
-      const res = await fetch(`${path}.js`);
-      if (res.ok) {
-        const product = await res.json();
-        apiBarcode = product?.variants?.[0]?.barcode || "";
-        apiTitle = product?.title || "";
-      }
-    } catch (_) {}
-
-    const combined = {
-      barcode: apiBarcode,
-      barcodes: domProduct.barcodes,
-      title: apiTitle || domProduct.title
-    };
-
-    if (!combined.title && !combined.barcode && combined.barcodes.length === 0) return;
-
-    const match = evaluateOwnership(combined, barcodeSet, asinSet, titlesMap);
-    renderBanner(match, daysOld);
+    await handleSimpleRetailPage({
+      host,
+      path,
+      currentKey,
+      daysOld,
+      barcodeSet,
+      asinSet,
+      titlesMap,
+      isProductPath: p => p.startsWith("/products/"),
+      extractor: extractJbhifiProduct,
+      supportsJsEndpoint: true
+    });
     return;
   }
 
-  // 2. Amazon.com.au
-  if (host.includes("amazon.com.au")) {
+  // 2. Sanity
+  if (host.includes("sanity.com.au")) {
+    await handleSimpleRetailPage({
+      host,
+      path,
+      currentKey,
+      daysOld,
+      barcodeSet,
+      asinSet,
+      titlesMap,
+      isProductPath: p => p.startsWith("/products/") || p.includes("/product/"),
+      extractor: extractSanityProduct,
+      supportsJsEndpoint: true
+    });
+    return;
+  }
+
+  // 3. EzyDVD
+  if (host.includes("ezydvd.com.au")) {
+    await handleSimpleRetailPage({
+      host,
+      path,
+      currentKey,
+      daysOld,
+      barcodeSet,
+      asinSet,
+      titlesMap,
+      isProductPath: p => /\/dp\/\d+/i.test(p) || /^\/(?:blu-ray|4k-uhd|dvd|product|products)\//i.test(p),
+      extractor: extractEzydvdProduct,
+      supportsJsEndpoint: false
+    });
+    return;
+  }
+
+  // 4. Global Amazon storefronts
+  if (isAmazonHost(host)) {
     const isProductPage = /\/(?:dp|gp\/product)\/[A-Z0-9]{10}/i.test(path) || document.querySelector("#productTitle");
     if (!isProductPage) {
       lastCheckedKey = currentKey;
@@ -349,8 +434,8 @@ async function checkCurrentPage() {
     return;
   }
 
-  // 3. eBay.com.au
-  if (host.includes("ebay.com.au")) {
+  // 5. Global eBay storefronts
+  if (isEbayHost(host)) {
     if (!path.startsWith("/itm/")) {
       lastCheckedKey = currentKey;
       ebayPollTicks = 0;
