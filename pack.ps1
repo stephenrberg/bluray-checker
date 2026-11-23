@@ -37,6 +37,7 @@ $ExcludePatterns = @(
     ".idea",
     "dist",
     "build",
+    "screenshots",
     "*.csv",
     "*.md",
     "*.ps1",
