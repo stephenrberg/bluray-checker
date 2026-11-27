@@ -8,7 +8,7 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "description": "Flags movies & TV discs you already own across JB Hi-Fi, Sanity, EzyDVD, Outrun DVD, Orbit DVD, DeadEndDVD, Umbrella, PLAY Music & DVDs, CeX AU, Amazon, and eBay using your Blu-ray.com CSV export.",
+  "description": "Checks movie & TV discs on AU & global stores (JB Hi-Fi, Sanity, EzyDVD, Outrun, Orbit, DeadEnd, Umbrella, PLAY, CeX) vs CSV.",
   "permissions": [
     "storage"
   ],
