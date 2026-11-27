@@ -2,7 +2,16 @@ function normalizeTitle(raw) {
   return (raw || "")
     .toLowerCase()
     .replace(/\[.*?\]|\(.*?\)/g, " ")
-    .replace(/\b(4k ultra hd|ultra hd|uhd|4k|blu-ray|bluray|blu ray|dvd|3d|steelbook|mediabook|slipcover|o-ring|collector'?s edition|limited edition|special edition|remastered|region [a-c0-9]|region free|australia|australian|aus stock|import|uk import|us import|fsk|bbfc|brand new|new|sealed|free post|free postage|complete series|season \d+)\b/g, " ")
+    .replace(/\b(4k ultra hd|4k\s*\+\s*blu-?ray|4k\s+blu-?ray|ultra hd|uhd|4k|blu-ray|bluray|blu ray|dvd|3d|steelbook|mediabook|slipcover|o-ring|rigid case|collector'?s edition|limited edition|special edition|ltd|lionsgate limited|arrow video|vinegar syndrome|kino lorber|criterion collection|shout factory|scream factory|second sight|imprint|exclusive|remastered|region [a-c0-9]|region free|australia|australian|aus stock|import|uk import|us import|us|uk|fsk|bbfc|brand new|new|sealed|free post|free postage|complete series|season \d+)\b/g, " ")
+    .replace(/\bii\b/g, "2")
+    .replace(/\biii\b/g, "3")
+    .replace(/\biv\b/g, "4")
+    .replace(/\bv\b/g, "5")
+    .replace(/\bvi\b/g, "6")
+    .replace(/\bvii\b/g, "7")
+    .replace(/\bviii\b/g, "8")
+    .replace(/\bix\b/g, "9")
+    .replace(/\bx\b/g, "10")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -127,16 +136,30 @@ function extractBarcodesFromText(rawText, maxMatches = 20) {
 
 function extractJsonLdBarcodes(doc = document) {
   const found = [];
+  const addIfBarcode = (val) => {
+    if (typeof val !== "string" && typeof val !== "number") return;
+    const str = String(val).trim();
+    if (!/^[0-9\s\-]{12,17}$/.test(str)) return;
+    const clean = str.replace(/[^0-9]/g, "");
+    if ((clean.length === 12 || clean.length === 13) && !found.includes(clean)) {
+      found.push(clean);
+    }
+  };
+
   doc.querySelectorAll('script[type="application/ld+json"]').forEach(script => {
     try {
       const json = JSON.parse(script.textContent);
       const items = Array.isArray(json) ? json : [json];
       for (const item of items) {
         if (!item || typeof item !== "object") continue;
-        for (const key of ["gtin13", "gtin12", "gtin", "gtin14", "productID", "isbn"]) {
-          const clean = String(item[key] || "").replace(/[^0-9]/g, "");
-          if ((clean.length === 12 || clean.length === 13) && !found.includes(clean)) {
-            found.push(clean);
+        for (const key of ["gtin13", "gtin12", "gtin", "gtin14", "productID", "isbn", "sku"]) {
+          addIfBarcode(item[key]);
+        }
+        const offers = Array.isArray(item.offers) ? item.offers : item.offers ? [item.offers] : [];
+        for (const offer of offers) {
+          if (!offer || typeof offer !== "object") continue;
+          for (const key of ["gtin13", "gtin12", "gtin", "gtin14", "sku"]) {
+            addIfBarcode(offer[key]);
           }
         }
       }
@@ -145,14 +168,15 @@ function extractJsonLdBarcodes(doc = document) {
   return found;
 }
 
-function extractRetailStoreProduct(siteSuffixRegex) {
-  const h1 = document.querySelector("h1");
+function extractRetailStoreProduct(siteSuffixRegex, scopeSelector = null) {
+  const scopeEl = scopeSelector ? document.querySelector(scopeSelector) : null;
+  const h1 = (scopeEl || document).querySelector("h1") || document.querySelector("h1");
   const rawTitle = h1?.textContent?.trim() || document.title.replace(siteSuffixRegex, "").trim();
   const title = rawTitle || "";
 
   const barcodes = new Set(extractJsonLdBarcodes(document));
   try {
-    const rawBody = document.body?.innerText;
+    const rawBody = scopeEl ? scopeEl.innerText : document.body?.innerText;
     for (const code of extractBarcodesFromText(rawBody)) {
       barcodes.add(code);
     }
@@ -171,6 +195,65 @@ function extractSanityProduct() {
 
 function extractEzydvdProduct() {
   return extractRetailStoreProduct(/\s*[\|\-]\s*EzyDVD.*$/i);
+}
+
+function extractOutrunDvdProduct() {
+  return extractRetailStoreProduct(/\s*[\|\-\u2013]\s*Outrun\s*DVD.*$/i);
+}
+
+function extractOrbitDvdProduct() {
+  return extractRetailStoreProduct(/\s*[\|\-\u2013]\s*Orbit\s*DVD.*$/i);
+}
+
+function extractDeadEndDvdProduct() {
+  return extractRetailStoreProduct(/\s*[\|\-\u2013]\s*DeadEndDVD.*$/i);
+}
+
+function extractUmbrellaProduct() {
+  const domTitle =
+    document.querySelector("product-info .product-title, .product-title")?.textContent?.trim() ||
+    document.querySelector('meta[property="og:title"]')?.getAttribute("content")?.trim() ||
+    "";
+  const fallback = extractRetailStoreProduct(/\s*[\|\-\u2013\u2014]\s*Umbrella\s*Entertainment.*$/i);
+
+  return {
+    barcodes: fallback.barcodes,
+    title: domTitle || fallback.title
+  };
+}
+
+function extractPlayMusicDvdProduct() {
+  return extractRetailStoreProduct(
+    /\s*[\|\-\u2013\u2014]\s*(?:PLAY\s*Music\s*&?\s*DVDs?|Play\s*Music\s*DVDs?).*$/i,
+    "div.product.type-product"
+  );
+}
+
+function extractCexProduct() {
+  const h1 = document.querySelector("h1");
+  const h1Text = h1?.textContent?.trim() || "";
+  const docTitleClean = document.title
+    .replace(/\s*[\|\-\u2013\u2014]\s*CeX(?:\s*\([^)]*\))?.*$/i, "")
+    .trim();
+  const title = h1Text || (/^cex\b/i.test(docTitleClean) ? "" : docTitleClean);
+
+  const barcodes = new Set(extractJsonLdBarcodes(document));
+
+  try {
+    const paramId = (new URLSearchParams(window.location.search).get("id") || "").replace(/[^0-9]/g, "");
+    if (paramId.length === 12 || paramId.length === 13) {
+      barcodes.add(paramId);
+    }
+  } catch (_) {}
+
+  try {
+    const rawBody = document.body?.innerText;
+    for (const code of extractBarcodesFromText(rawBody)) {
+      barcodes.add(code);
+    }
+  } catch (_) {}
+
+  return { barcodes: Array.from(barcodes), title };
 }
 
 function extractAmazonProduct() {
@@ -312,9 +395,10 @@ async function handleSimpleRetailPage({ host, path, currentKey, daysOld, barcode
   let apiBarcode = "";
   let apiTitle = "";
 
-  if (supportsJsEndpoint && path.startsWith("/products/")) {
+  if (supportsJsEndpoint && path.includes("/products/")) {
+    const jsPath = path.replace(/^\/collections\/[^/]+/, "");
     try {
-      const res = await fetch(`${path}.js`);
+      const res = await fetch(`${jsPath}.js`);
       if (res.ok) {
         const product = await res.json();
         apiBarcode = product?.variants?.[0]?.barcode || "";
@@ -337,7 +421,9 @@ async function handleSimpleRetailPage({ host, path, currentKey, daysOld, barcode
 
 let lastCheckedKey = "";
 let ebayPollTicks = 0;
+let cexPollTicks = 0;
 const MAX_EBAY_POLL_TICKS = 6; // ~9s at 1500ms interval
+const MAX_CEX_POLL_TICKS = 8; // ~12s at 1500ms interval
 
 async function checkCurrentPage() {
   if (document.hidden) return;
@@ -416,7 +502,121 @@ async function checkCurrentPage() {
     return;
   }
 
-  // 4. Global Amazon storefronts
+  // 4. Outrun DVD
+  if (host.includes("outrundvd.com.au")) {
+    await handleSimpleRetailPage({
+      host,
+      path,
+      currentKey,
+      daysOld,
+      barcodeSet,
+      asinSet,
+      titlesMap,
+      isProductPath: p => p.includes("/products/"),
+      extractor: extractOutrunDvdProduct,
+      supportsJsEndpoint: true
+    });
+    return;
+  }
+
+  // 5. Orbit DVD
+  if (host.includes("orbitdvd.com")) {
+    await handleSimpleRetailPage({
+      host,
+      path,
+      currentKey,
+      daysOld,
+      barcodeSet,
+      asinSet,
+      titlesMap,
+      isProductPath: p => p.includes("/products/"),
+      extractor: extractOrbitDvdProduct,
+      supportsJsEndpoint: true
+    });
+    return;
+  }
+
+  // 6. DeadEndDVD
+  if (host.includes("deadenddvd.com")) {
+    await handleSimpleRetailPage({
+      host,
+      path,
+      currentKey,
+      daysOld,
+      barcodeSet,
+      asinSet,
+      titlesMap,
+      isProductPath: p => p.includes("/products/"),
+      extractor: extractDeadEndDvdProduct,
+      supportsJsEndpoint: true
+    });
+    return;
+  }
+
+  // 7. Umbrella Entertainment
+  if (host.includes("umbrellaent.com.au")) {
+    await handleSimpleRetailPage({
+      host,
+      path,
+      currentKey,
+      daysOld,
+      barcodeSet,
+      asinSet,
+      titlesMap,
+      isProductPath: p => p.includes("/products/"),
+      extractor: extractUmbrellaProduct,
+      supportsJsEndpoint: true
+    });
+    return;
+  }
+
+  // 8. PLAY Music & DVDs
+  if (host.includes("playmusicdvds.com.au")) {
+    await handleSimpleRetailPage({
+      host,
+      path,
+      currentKey,
+      daysOld,
+      barcodeSet,
+      asinSet,
+      titlesMap,
+      isProductPath: p => p.includes("/product/") || p.includes("/products/"),
+      extractor: extractPlayMusicDvdProduct,
+      supportsJsEndpoint: false
+    });
+    return;
+  }
+
+  // 9. CeX Australia
+  if (host.includes("webuy.com")) {
+    if (!path.includes("/product")) {
+      lastCheckedKey = currentKey;
+      cexPollTicks = 0;
+      renderBanner(null, 0);
+      return;
+    }
+
+    cexPollTicks++;
+    const cexProduct = extractCexProduct();
+    if (!cexProduct.title && cexProduct.barcodes.length === 0) {
+      if (cexPollTicks >= MAX_CEX_POLL_TICKS) {
+        lastCheckedKey = currentKey;
+        cexPollTicks = 0;
+      }
+      return;
+    }
+
+    const match = evaluateOwnership(cexProduct, barcodeSet, asinSet, titlesMap);
+    renderBanner(match, daysOld);
+
+    if (cexProduct.title || cexPollTicks >= MAX_CEX_POLL_TICKS) {
+      lastCheckedKey = currentKey;
+      cexPollTicks = 0;
+    }
+    return;
+  }
+
+  // 10. Global Amazon storefronts
   if (isAmazonHost(host)) {
     const isProductPage = /\/(?:dp|gp\/product)\/[A-Z0-9]{10}/i.test(path) || document.querySelector("#productTitle");
     if (!isProductPage) {
@@ -434,7 +634,7 @@ async function checkCurrentPage() {
     return;
   }
 
-  // 5. Global eBay storefronts
+  // 11. Global eBay storefronts
   if (isEbayHost(host)) {
     if (!path.startsWith("/itm/")) {
       lastCheckedKey = currentKey;
